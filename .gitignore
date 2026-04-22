@@ -17,3 +17,8 @@ venv/
 htmlcov/
 .coverage
 *.log
+
+# Local env files
+.env
+.env.local
+
