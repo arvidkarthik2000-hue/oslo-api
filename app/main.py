@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import auth, profiles, consents, documents, health, emergency, timeline
+from app.routers import auth, profiles, consents, documents, health, emergency, timeline, trends, smart_report, ask, wearable
 from app.middleware.audit import AuditMiddleware
 
 settings = get_settings()
@@ -58,3 +58,7 @@ app.include_router(consents.router, prefix="/consents", tags=["Consents"])
 app.include_router(documents.router, prefix="/documents", tags=["Documents"])
 app.include_router(emergency.router, prefix="/profiles", tags=["Emergency"])
 app.include_router(timeline.router, prefix="/timeline", tags=["Timeline"])
+app.include_router(trends.router, prefix="/trends", tags=["Trends"])
+app.include_router(smart_report.router, prefix="/smart-report", tags=["Smart Report"])
+app.include_router(ask.router, prefix="/ask", tags=["Ask AI"])
+app.include_router(wearable.router, prefix="/wearable", tags=["Wearable"])

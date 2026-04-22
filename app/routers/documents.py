@@ -439,3 +439,91 @@ async def explain_document(
         )
     except ai_service.AIServiceError:
         raise HTTPException(status_code=503, detail="Explanation unavailable. Tap to retry.")
+
+
+@router.get("/{document_id}/compare")
+async def compare_document(
+    document_id: uuid.UUID,
+    owner: Owner = Depends(get_current_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Find previous report of the same lab chain for comparison."""
+    # Get the current document
+    result = await db.execute(
+        select(Document).where(
+            Document.document_id == document_id,
+            Document.owner_id == owner.owner_id,
+        )
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Find previous document of same class and provider
+    q = select(Document).where(
+        Document.owner_id == owner.owner_id,
+        Document.profile_id == doc.profile_id,
+        Document.classified_as == doc.classified_as,
+        Document.document_id != document_id,
+        Document.deleted_at.is_(None),
+    ).order_by(Document.uploaded_at.desc()).limit(1)
+
+    if doc.provider_name:
+        q = q.where(Document.provider_name == doc.provider_name)
+
+    prev_result = await db.execute(q)
+    prev_doc = prev_result.scalar_one_or_none()
+
+    if not prev_doc:
+        return {"has_previous": False, "previous": None}
+
+    # Get current extraction for previous doc
+    prev_ext = (await db.execute(
+        select(Extraction).where(
+            Extraction.document_id == prev_doc.document_id,
+            Extraction.is_current == True,
+        )
+    )).scalar_one_or_none()
+
+    # Get current extraction for this doc
+    curr_ext = (await db.execute(
+        select(Extraction).where(
+            Extraction.document_id == document_id,
+            Extraction.is_current == True,
+        )
+    )).scalar_one_or_none()
+
+    # Build comparison
+    comparison = []
+    if curr_ext and prev_ext and doc.classified_as == "lab_report":
+        curr_tests = {t["test_name"]: t for t in (curr_ext.json_payload or {}).get("tests", [])}
+        prev_tests = {t["test_name"]: t for t in (prev_ext.json_payload or {}).get("tests", [])}
+
+        for name in curr_tests:
+            curr = curr_tests[name]
+            prev = prev_tests.get(name)
+            entry = {
+                "test_name": name,
+                "current_value": curr.get("value_num"),
+                "current_flag": curr.get("flag"),
+                "unit": curr.get("unit"),
+            }
+            if prev:
+                entry["previous_value"] = prev.get("value_num")
+                entry["previous_flag"] = prev.get("flag")
+                if curr.get("value_num") and prev.get("value_num"):
+                    diff = curr["value_num"] - prev["value_num"]
+                    entry["change"] = diff
+                    entry["change_pct"] = round((diff / prev["value_num"]) * 100, 1) if prev["value_num"] else None
+            comparison.append(entry)
+
+    return {
+        "has_previous": True,
+        "previous": {
+            "document_id": prev_doc.document_id,
+            "provider_name": prev_doc.provider_name,
+            "uploaded_at": prev_doc.uploaded_at.isoformat() if prev_doc.uploaded_at else None,
+            "document_date": prev_doc.document_date.isoformat() if prev_doc.document_date else None,
+        },
+        "comparison": comparison,
+    }
