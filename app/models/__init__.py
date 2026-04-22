@@ -12,10 +12,12 @@ from app.models.teleconsult import TeleconsultSession, TeleconsultMessage
 from app.models.rmp import RMP
 from app.models.audit_event import AuditEvent
 from app.models.document_embedding import DocumentEmbedding
+from app.models.wearable_reading import WearableReading
+from app.models.smart_report_cache import SmartReportCache
 
 __all__ = [
     "Owner", "Profile", "Document", "Extraction", "LabValue",
     "Prescription", "TimelineEvent", "EmergencyProfile", "Consent",
     "ShareLink", "TeleconsultSession", "TeleconsultMessage", "RMP",
-    "AuditEvent", "DocumentEmbedding",
+    "AuditEvent", "DocumentEmbedding", "WearableReading", "SmartReportCache",
 ]

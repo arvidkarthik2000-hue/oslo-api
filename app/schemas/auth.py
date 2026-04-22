@@ -4,18 +4,17 @@ from pydantic import BaseModel, Field
 
 
 class OTPSendRequest(BaseModel):
-    phone_number: str = Field(..., pattern=r"^\+?[1-9]\d{6,14}$", examples=["+919876543210"])
+    phone_number: str = Field(..., description="E.164 format, e.g. +919876543210")
 
 
 class OTPSendResponse(BaseModel):
     request_id: str
-    expires_in: int = 300  # 5 minutes
+    expires_in: int = 300
 
 
 class OTPVerifyRequest(BaseModel):
-    phone_number: str = Field(..., pattern=r"^\+?[1-9]\d{6,14}$")
-    request_id: str
-    otp: str = Field(..., min_length=4, max_length=6)
+    phone_number: str
+    otp: str
 
 
 class OTPVerifyResponse(BaseModel):
@@ -32,3 +31,12 @@ class RefreshRequest(BaseModel):
 
 class RefreshResponse(BaseModel):
     access_token: str
+
+
+class DevCreateResponse(BaseModel):
+    """Response for POC dev-create endpoint."""
+    access_token: str
+    refresh_token: str
+    owner_id: uuid.UUID
+    profile_id: uuid.UUID
+    is_new: bool
