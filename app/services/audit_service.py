@@ -2,10 +2,11 @@
 
 Every mutation MUST emit an audit event. If audit write fails, the mutation fails.
 """
+import json
 import uuid
-from datetime import datetime, timezone
+from sqlalchemy import bindparam, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
 
 
 async def log_audit_event(
@@ -22,17 +23,22 @@ async def log_audit_event(
     user_agent: str | None = None,
 ) -> None:
     """Write an audit event to the audit_event table.
-    
-    This runs within the current transaction, so if it fails,
-    the parent mutation also rolls back.
+
+    Runs within the current transaction; if this fails the parent mutation also rolls back.
     """
+    stmt = text("""
+        INSERT INTO audit_event (
+            owner_id, profile_id, action, actor_type, actor_id,
+            resource_type, resource_id, metadata, ip_address, user_agent
+        )
+        VALUES (
+            :owner_id, :profile_id, :action, :actor_type, :actor_id,
+            :resource_type, :resource_id, :metadata, :ip_address, :user_agent
+        )
+    """).bindparams(bindparam("metadata", type_=JSONB))
+
     await db.execute(
-        text("""
-            INSERT INTO audit_event (owner_id, profile_id, action, actor_type, actor_id,
-                                    resource_type, resource_id, metadata, ip_address, user_agent)
-            VALUES (:owner_id, :profile_id, :action, :actor_type, :actor_id,
-                    :resource_type, :resource_id, :metadata::jsonb, :ip_address, :user_agent)
-        """),
+        stmt,
         {
             "owner_id": owner_id,
             "profile_id": profile_id,
@@ -41,7 +47,7 @@ async def log_audit_event(
             "actor_id": actor_id or owner_id,
             "resource_type": resource_type,
             "resource_id": resource_id,
-            "metadata": str(metadata) if metadata else None,
+            "metadata": metadata,  # pass dict directly; SQLAlchemy JSONB adapter handles it
             "ip_address": ip_address,
             "user_agent": user_agent,
         },
