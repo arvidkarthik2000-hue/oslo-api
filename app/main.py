@@ -9,6 +9,7 @@ from app.routers import auth, profiles, consents, documents, health, emergency
 from app.middleware.audit import AuditMiddleware
 
 settings = get_settings()
+is_dev = settings.environment == "development"
 
 # Sentry
 if settings.sentry_dsn:
@@ -33,14 +34,14 @@ app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     lifespan=lifespan,
-    docs_url="/docs" if settings.debug else None,
-    redoc_url="/redoc" if settings.debug else None,
+    docs_url="/docs" if is_dev else None,
+    redoc_url="/redoc" if is_dev else None,
 )
 
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.debug else ["https://oslo-doctor.vercel.app"],
+    allow_origins=["*"] if is_dev else ["https://oslo-doctor.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

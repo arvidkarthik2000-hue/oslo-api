@@ -4,7 +4,6 @@ import os
 from httpx import AsyncClient, ASGITransport
 
 os.environ["ENVIRONMENT"] = "development"
-os.environ["DEBUG"] = "true"
 os.environ["JWT_SECRET_KEY"] = "test-secret-key"
 os.environ["DATABASE_URL"] = "postgresql+asyncpg://postgres:postgres@localhost:5432/oslo_test"
 

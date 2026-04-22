@@ -11,21 +11,20 @@ MSG91_BASE = "https://control.msg91.com/api/v5"
 
 async def send_otp(phone_number: str) -> dict:
     """Send OTP via MSG91.
-    
+
     Args:
         phone_number: E.164 format phone number (e.g., '919876543210')
-    
+
     Returns:
         dict with request_id and status
     """
-    # Strip + prefix if present
     phone = phone_number.lstrip("+")
-    
-    # In development mode, use a mock OTP
-    if settings.environment == "development" and not settings.msg91_auth_key:
-        logger.warning("DEV MODE: Sending mock OTP to %s***", phone[:4])
-        return {"request_id": "dev-mock-request", "type": "success"}
-    
+
+    # Dev-mode bypass: skip MSG91, log OTP to stdout
+    if settings.environment == "development":
+        print(f"Dev OTP for {phone}: 123456")
+        return {"request_id": f"dev-{phone}", "type": "success"}
+
     async with httpx.AsyncClient() as client:
         response = await client.post(
             f"{MSG91_BASE}/otp",
@@ -46,16 +45,15 @@ async def send_otp(phone_number: str) -> dict:
 
 async def verify_otp(phone_number: str, otp: str) -> bool:
     """Verify OTP via MSG91.
-    
+
     Returns True if OTP is valid.
     """
     phone = phone_number.lstrip("+")
-    
-    # Dev mode: accept '123456' as valid OTP
-    if settings.environment == "development" and not settings.msg91_auth_key:
-        logger.warning("DEV MODE: Accepting mock OTP for %s***", phone[:4])
+
+    # Dev-mode bypass: accept 123456 for any phone
+    if settings.environment == "development":
         return otp == "123456"
-    
+
     async with httpx.AsyncClient() as client:
         response = await client.get(
             f"{MSG91_BASE}/otp/verify",

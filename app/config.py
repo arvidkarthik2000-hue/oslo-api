@@ -7,7 +7,6 @@ class Settings(BaseSettings):
     # App
     app_name: str = "OSLO API"
     app_version: str = "0.1.0"
-    debug: bool = False
     environment: str = "development"  # development | staging | production
 
     # Database
