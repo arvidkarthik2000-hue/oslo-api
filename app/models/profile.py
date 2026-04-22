@@ -3,7 +3,7 @@ import uuid
 from datetime import date, datetime
 from sqlalchemy import String, Date, DateTime, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship as sa_relationship
 from app.database import Base
 
 
@@ -13,7 +13,7 @@ class Profile(Base):
     profile_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("owner.owner_id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    relationship_type: Mapped[str] = mapped_column("relationship", String, nullable=False)  # 'self'|'spouse'|'child'|'parent'|'other'
+    relationship: Mapped[str] = mapped_column(String, nullable=False)  # 'self'|'spouse'|'child'|'parent'|'other'
     dob: Mapped[date | None] = mapped_column(Date)
     sex: Mapped[str | None] = mapped_column(String)  # 'M'|'F'|'other'
     blood_group: Mapped[str | None] = mapped_column(String)
@@ -25,5 +25,5 @@ class Profile(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships
-    owner = relationship("Owner", back_populates="profiles")
-    emergency_profile = relationship("EmergencyProfile", back_populates="profile", uselist=False)
+    owner = sa_relationship("Owner", back_populates="profiles")
+    emergency_profile = sa_relationship("EmergencyProfile", back_populates="profile", uselist=False)

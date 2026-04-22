@@ -54,13 +54,13 @@ async def get_smart_report(
     patient_profile = {}
     if profile:
         patient_profile = {
-            "name": profile.display_name,
+            "name": profile.name,
             "sex": profile.sex,
             "blood_group": profile.blood_group,
         }
-        if profile.date_of_birth:
+        if profile.dob:
             from datetime import date
-            age = (date.today() - profile.date_of_birth).days // 365
+            age = (date.today() - profile.dob).days // 365
             patient_profile["age"] = age
 
     # Gather lab values (last 200)

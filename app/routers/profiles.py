@@ -58,7 +58,7 @@ async def create_profile(
         existing_self = await db.execute(
             select(Profile).where(
                 Profile.owner_id == owner.owner_id,
-                Profile.relationship_type == "self",
+                Profile.relationship == "self",
                 Profile.deleted_at.is_(None),
             )
         )
@@ -68,7 +68,7 @@ async def create_profile(
     profile = Profile(
         owner_id=owner.owner_id,
         name=body.name,
-        relationship_type=body.relationship,
+        relationship=body.relationship,
         dob=body.dob,
         sex=body.sex,
         blood_group=body.blood_group,
@@ -163,7 +163,7 @@ async def delete_profile(
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     
-    if profile.relationship_type == "self":
+    if profile.relationship == "self":
         raise HTTPException(status_code=400, detail="Cannot delete your own profile. Use account deletion instead.")
     
     profile.deleted_at = datetime.now(timezone.utc)
