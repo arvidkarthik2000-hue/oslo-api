@@ -2,8 +2,10 @@
 import uuid
 import hashlib
 import logging
+import os
+from pathlib import Path
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
 
@@ -29,6 +31,10 @@ from app.schemas.document import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Upload directory for POC file serving
+UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
 
 
 @router.post("", response_model=DocumentUploadResponse, status_code=201)
@@ -64,6 +70,43 @@ async def create_document(
         upload_url=None,  # POC: client uploads directly to Supabase storage
         status="pending",
     )
+
+
+@router.post("/{document_id}/upload-file")
+async def upload_document_file(
+    document_id: uuid.UUID,
+    file: UploadFile = File(...),
+    owner: Owner = Depends(get_current_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload the actual file for a document. Returns a public URL for AI processing."""
+    result = await db.execute(
+        select(Document).where(
+            Document.document_id == document_id,
+            Document.owner_id == owner.owner_id,
+        )
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Determine extension from filename or mime
+    ext = os.path.splitext(file.filename or "upload")[1] or ".bin"
+    save_name = f"{document_id}{ext}"
+    save_path = UPLOAD_DIR / save_name
+
+    content = await file.read()
+    if len(content) > 15 * 1024 * 1024:  # 15MB server-side limit
+        raise HTTPException(status_code=413, detail="File too large (max 15MB)")
+
+    with open(save_path, "wb") as f:
+        f.write(content)
+
+    # Update document s3_key to the local path
+    doc.s3_key = f"uploads/{save_name}"
+    logger.info("File uploaded for doc %s: %s (%d bytes)", document_id, save_name, len(content))
+
+    return {"file_url": f"/uploads/{save_name}", "file_name": save_name, "byte_size": len(content)}
 
 
 @router.post("/{document_id}/finalize", response_model=DocumentFinalizeResponse)

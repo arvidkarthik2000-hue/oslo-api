@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.routers import auth, profiles, consents, documents, health, emergency, timeline, trends, smart_report, ask, wearable
 from app.middleware.audit import AuditMiddleware
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
 
 settings = get_settings()
 is_dev = settings.environment == "development"
@@ -62,3 +64,8 @@ app.include_router(trends.router, prefix="/trends", tags=["Trends"])
 app.include_router(smart_report.router, prefix="/smart-report", tags=["Smart Report"])
 app.include_router(ask.router, prefix="/ask", tags=["Ask AI"])
 app.include_router(wearable.router, prefix="/wearable", tags=["Wearable"])
+
+# Static file serving for uploaded documents (POC — production uses S3/Supabase)
+_uploads_dir = Path(__file__).resolve().parent.parent / "uploads"
+_uploads_dir.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
