@@ -75,6 +75,11 @@ async def dev_create(
         db.add(profile)
         await db.flush()
 
+    # Seed demo data on first creation
+    if is_new:
+        from app.services.demo_seed import seed_demo_data
+        await seed_demo_data(db, owner.owner_id, profile.profile_id)
+
     access_token = create_access_token(owner.owner_id)
     refresh_token = create_refresh_token(owner.owner_id)
 

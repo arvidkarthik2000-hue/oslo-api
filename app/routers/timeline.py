@@ -16,6 +16,7 @@ from app.models.smart_report_cache import SmartReportCache
 from app.dependencies import get_current_owner
 from app.services import ai_service
 from app.services.audit_service import log_audit_event
+from pydantic import BaseModel
 from app.schemas.timeline import (
     TimelineListResponse, TimelineEventItem,
     TimelineNoteRequest, TimelineNoteResponse,
@@ -151,13 +152,19 @@ async def create_voice_note(
     )
 
 
+class _SummarizeRequest(BaseModel):
+    profile_id: uuid.UUID
+    report_type: str = "timeline_summary"
+
+
 @router.post("/summarize", response_model=TimelineSummaryResponse)
 async def timeline_summary(
-    profile_id: uuid.UUID,
+    body: _SummarizeRequest,
     owner: Owner = Depends(get_current_owner),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate AI timeline summary. Uses cache if available (24h TTL)."""
+    profile_id = body.profile_id
     # Check cache
     cache_q = select(SmartReportCache).where(
         SmartReportCache.owner_id == owner.owner_id,
