@@ -14,6 +14,7 @@ from app.models.extraction import Extraction
 from app.models.lab_value import LabValue
 from app.models.prescription import Prescription
 from app.models.timeline_event import TimelineEvent
+from app.models.document_embedding import DocumentEmbedding
 from app.dependencies import get_current_owner
 from app.services import ai_service
 from app.services.audit_service import log_audit_event
@@ -177,6 +178,65 @@ async def finalize_document(
 
     except ai_service.AIServiceError as e:
         logger.error("Extraction failed for %s: %s", document_id, e)
+
+    # --- Step 2b: Embed chunks for RAG ---
+    if extraction_id and ext_data:
+        try:
+            chunks: list[tuple[str, str]] = []  # (chunk_type, chunk_text)
+
+            if doc.classified_as == "lab_report" and "tests" in ext_data:
+                lab_name = ext_data.get("lab_name", "")
+                for test in ext_data["tests"]:
+                    name = test.get("test_name", "Unknown")
+                    val = test.get("value_num", "")
+                    unit = test.get("unit", "")
+                    ref_lo = test.get("ref_low")
+                    ref_hi = test.get("ref_high")
+                    flag = test.get("flag", "ok")
+
+                    chunk = f"{name}: {val}{unit}"
+                    if ref_lo is not None and ref_hi is not None:
+                        flag_desc = {"watch": "borderline", "flag": "abnormal", "critical": "critical"}.get(flag, "")
+                        ref_part = f" (ref {ref_lo}-{ref_hi}{unit}"
+                        if flag_desc:
+                            ref_part += f", {flag_desc}"
+                        ref_part += ")"
+                        chunk += ref_part
+                    chunk += f". Date: {report_date_str or 'unknown'}."
+                    if lab_name:
+                        chunk += f" Lab: {lab_name}."
+                    chunks.append(("extracted", chunk))
+
+            elif doc.classified_as == "prescription" and "medications" in ext_data:
+                for med in ext_data["medications"]:
+                    name = med.get("name", "Unknown")
+                    dosage = med.get("dosage", "")
+                    freq = med.get("frequency", "")
+                    chunk = f"{name} {dosage}".strip()
+                    if freq:
+                        chunk += f", {freq}"
+                    chunk += f", started {report_date_str or 'unknown'}, active."
+                    chunks.append(("extracted", chunk))
+
+            if chunks:
+                texts = [c[1] for c in chunks]
+                embed_result = await ai_service.embed(texts)
+                embeddings = embed_result.get("embeddings", [])
+
+                for i, (chunk_type, chunk_text) in enumerate(chunks):
+                    if i < len(embeddings):
+                        emb = DocumentEmbedding(
+                            owner_id=owner.owner_id,
+                            profile_id=doc.profile_id,
+                            document_id=doc.document_id,
+                            chunk_type=chunk_type,
+                            chunk_text=chunk_text,
+                            embedding=embeddings[i],
+                        )
+                        db.add(emb)
+
+        except Exception as e:
+            logger.warning("Embedding failed for %s (non-fatal): %s", document_id, e)
 
     # --- Step 3: Create timeline event ---
     event_type_map = {
