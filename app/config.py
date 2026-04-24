@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     ai_service_api_key: str = ""
     ai_service_timeout_seconds: int = 30
 
+    # Public base URL for file serving (used when behind tunnel/proxy)
+    public_base_url: str = ""
+
     # Razorpay
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""

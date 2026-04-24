@@ -217,9 +217,16 @@ async def finalize_document(
     doc.sha256 = body.sha256 or hashlib.sha256(s3_key.encode()).hexdigest()[:16]
 
     # Build public URL for AI service from stored file
-    base_url = str(request.base_url).rstrip("/") if request else "http://localhost:8000"
+    # Use PUBLIC_BASE_URL (tunnel URL) so the remote AI service can reach the file
+    from app.config import get_settings as _gs
+    _settings = _gs()
+    if _settings.public_base_url:
+        base_url = _settings.public_base_url.rstrip("/")
+    else:
+        base_url = str(request.base_url).rstrip("/") if request else "http://localhost:8000"
     file_url = f"{base_url}/{s3_key}" if s3_key else ""
     image_urls = body.image_urls if body.image_urls else ([file_url] if file_url else [])
+    logger.info("Finalize doc %s: file_url=%s, image_urls=%s", document_id, file_url, image_urls)
 
     # ── SMART CLASSIFICATION (filename + mime + AI fallback) ──
     filename = (s3_key or "").lower()
@@ -252,15 +259,15 @@ async def finalize_document(
     elif "pdf" in mime or "image" in mime:
         smart_class = "lab_report"
 
-    # Try AI classification with SHORT timeout (5s) — fall through to mock on failure
+    # Try AI classification with timeout — fall through to mock on failure
     ai_worked = False
     try:
         owner_hash = hashlib.sha256(str(owner.owner_id).encode()).hexdigest()
         classify_result = await asyncio.wait_for(
             ai_service.classify(str(document_id), image_urls, owner_hash),
-            timeout=5.0,
+            timeout=30.0,
         )
-        ai_class = classify_result.get("class", "other")
+        ai_class = classify_result.get("document_class") or classify_result.get("class", "other")
         if ai_class != "other":
             doc.classified_as = ai_class
             doc.classification_confidence = classify_result.get("confidence", 0.85)
@@ -274,30 +281,45 @@ async def finalize_document(
         doc.classification_confidence = 0.85
         doc.classification_model_version = "smart_classify_v1"
 
-    # ── EXTRACTION (AI with short timeout, fallback to mock) ──
+    # ── EXTRACTION (AI with timeout, fallback to mock) ──
     extraction_id = None
     ext_data = {}
     extraction_data = None
     extract_model = "mock_fallback_v1"
-    try:
-        if ai_worked:
+    # Always try AI extraction if we have image_urls (regardless of classify source)
+    if image_urls and not ai_service._USE_MOCK:
+        try:
             extract_result = await asyncio.wait_for(
                 ai_service.extract(str(document_id), image_urls, doc.classified_as or "other", {}),
-                timeout=10.0,
+                timeout=90.0,
             )
             extraction_data = extract_result.get("extraction", {})
+            # Accept extraction if it has tests or medications, even with parse_error
+            has_tests = isinstance(extraction_data.get("tests"), list) and len(extraction_data.get("tests", [])) > 0
+            has_meds = isinstance(extraction_data.get("medications"), list) and len(extraction_data.get("medications", [])) > 0
             is_useful = (
                 extraction_data
-                and not extraction_data.get("parse_error")
+                and (has_tests or has_meds)
                 and "provide" not in str(extraction_data.get("raw_text", "")).lower()[:100]
             )
             if is_useful:
                 extract_model = extract_result.get("model_version", "unknown")
+                # Deduplicate tests by test_name (keep first occurrence)
+                if has_tests:
+                    seen = set()
+                    unique_tests = []
+                    for t in extraction_data["tests"]:
+                        name = t.get("test_name", "")
+                        if name not in seen:
+                            seen.add(name)
+                            unique_tests.append(t)
+                    extraction_data["tests"] = unique_tests
+                logger.info("AI extraction succeeded: %d tests, model=%s", len(extraction_data.get('tests', [])), extract_model)
             else:
                 extraction_data = None
-    except (asyncio.TimeoutError, Exception) as e:
-        logger.info("AI extract skipped (timeout/error): %s", e)
-        extraction_data = None
+        except (asyncio.TimeoutError, Exception) as e:
+            logger.info("AI extract skipped (timeout/error): %s", e)
+            extraction_data = None
 
     if not extraction_data:
         # Use original filename (stored in provider_name from upload) for lab name detection
