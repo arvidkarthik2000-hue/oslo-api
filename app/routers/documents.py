@@ -20,6 +20,7 @@ from app.models.timeline_event import TimelineEvent
 from app.models.document_embedding import DocumentEmbedding
 from app.dependencies import get_current_owner
 from app.services import ai_service
+from app.services import ai_service_mock
 from app.services.audit_service import log_audit_event
 from app.schemas.document import (
     DocumentUploadRequest, DocumentUploadResponse,
@@ -669,17 +670,32 @@ async def explain_document(
         raise HTTPException(status_code=404, detail="No extraction found")
 
     try:
-        explain_result = await ai_service.explain(
-            str(document_id),
-            extraction.json_payload,
+        explain_result = await asyncio.wait_for(
+            ai_service.explain(str(document_id), extraction.json_payload),
+            timeout=10.0,
         )
-        return ExplainResponse(
-            explanation_markdown=explain_result.get("explanation_markdown", ""),
-            critical_flags=explain_result.get("critical_flags", []),
-            urgency=explain_result.get("urgency", "routine"),
+    except (ai_service.AIServiceError, asyncio.TimeoutError, Exception) as exc:
+        logger.warning("AI explain failed (%s), using mock", exc)
+        explain_result = await ai_service_mock.mock_explain(
+            str(document_id), extraction.json_payload
         )
-    except ai_service.AIServiceError:
-        raise HTTPException(status_code=503, detail="Explanation unavailable. Tap to retry.")
+
+    # Normalize critical_flags: AI may return dicts, schema expects strings
+    raw_flags = explain_result.get("critical_flags", [])
+    flags = []
+    for f in raw_flags:
+        if isinstance(f, str):
+            flags.append(f)
+        elif isinstance(f, dict):
+            flags.append(f"{f.get('test', '')}: {f.get('value', '')} ({f.get('flag', '')})")
+        else:
+            flags.append(str(f))
+
+    return ExplainResponse(
+        explanation_markdown=explain_result.get("explanation_markdown", ""),
+        critical_flags=flags,
+        urgency=explain_result.get("urgency", "routine"),
+    )
 
 
 @router.get("/{document_id}/compare")

@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     ask_ai_free_monthly_limit: int = 10
     re_extract_daily_limit: int = 3
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "case_sensitive": False}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "case_sensitive": False, "extra": "ignore"}
 
 
 @lru_cache
