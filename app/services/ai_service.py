@@ -13,7 +13,7 @@ from app.services import ai_service_mock as mock
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-_TIMEOUT = 30.0  # seconds
+_TIMEOUT = 90.0  # seconds (Gemma 4 can take 60s on cold start)
 _USE_MOCK = not settings.ai_service_base_url or settings.ai_service_base_url == "https://oslo-ai.example.com"
 
 
