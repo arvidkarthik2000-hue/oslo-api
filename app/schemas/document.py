@@ -24,7 +24,7 @@ class DocumentUploadResponse(BaseModel):
 # --- Finalize (trigger AI pipeline) ---
 class DocumentFinalizeRequest(BaseModel):
     """Called after file is uploaded to storage."""
-    s3_key: str = Field(..., description="Storage key/path where file was uploaded")
+    s3_key: str = Field(default="", description="Storage key/path where file was uploaded")
     sha256: str = Field(default="", description="File hash for dedup")
     image_urls: list[str] = Field(default=[], description="Public URLs for AI processing")
 
