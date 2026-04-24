@@ -166,7 +166,7 @@ async def upload_document_file(
     doc.s3_key = f"uploads/{save_name}"
     logger.info("File uploaded for doc %s: %s (%d bytes)", document_id, save_name, len(content))
 
-    return {"file_url": f"/uploads/{save_name}", "file_name": save_name, "byte_size": len(content)}
+    return {"s3_key": doc.s3_key, "file_url": f"/uploads/{save_name}", "file_name": save_name, "byte_size": len(content)}
 
 
 @router.post("/{document_id}/finalize", response_model=DocumentFinalizeResponse)
