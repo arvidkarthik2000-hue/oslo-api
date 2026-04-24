@@ -1,4 +1,5 @@
 """Documents router — upload, finalize (classify+extract), list, detail, explain, correct."""
+import asyncio
 import uuid
 import hashlib
 import logging
@@ -229,137 +230,133 @@ async def finalize_document(
     elif "pdf" in mime or "image" in mime:
         smart_class = "lab_report"
 
-    # Try AI classification (but use smart_class as fallback)
+    # Try AI classification with SHORT timeout (5s) — fall through to mock on failure
+    ai_worked = False
     try:
         owner_hash = hashlib.sha256(str(owner.owner_id).encode()).hexdigest()
-        classify_result = await ai_service.classify(
-            str(document_id), image_urls, owner_hash
+        classify_result = await asyncio.wait_for(
+            ai_service.classify(str(document_id), image_urls, owner_hash),
+            timeout=5.0,
         )
         ai_class = classify_result.get("class", "other")
-        doc.classified_as = ai_class if ai_class != "other" else smart_class
-        doc.classification_confidence = classify_result.get("confidence", 0.85)
-        doc.classification_model_version = classify_result.get("model_version")
-    except Exception as e:
-        logger.warning("Classification failed for %s: %s — using smart_class: %s",
-                       document_id, e, smart_class)
+        if ai_class != "other":
+            doc.classified_as = ai_class
+            doc.classification_confidence = classify_result.get("confidence", 0.85)
+            doc.classification_model_version = classify_result.get("model_version")
+            ai_worked = True
+    except (asyncio.TimeoutError, Exception) as e:
+        logger.info("AI classify skipped (timeout/error): %s", e)
+
+    if not ai_worked:
         doc.classified_as = smart_class
         doc.classification_confidence = 0.85
         doc.classification_model_version = "smart_classify_v1"
 
-    # ── EXTRACTION (AI with fallback to mock) ──
+    # ── EXTRACTION (AI with short timeout, fallback to mock) ──
     extraction_id = None
     ext_data = {}
+    extraction_data = None
+    extract_model = "mock_fallback_v1"
     try:
-        extract_result = await ai_service.extract(
-            str(document_id), image_urls, doc.classified_as or "other", {}
-        )
-        extraction_data = extract_result.get("extraction", {})
+        if ai_worked:
+            extract_result = await asyncio.wait_for(
+                ai_service.extract(str(document_id), image_urls, doc.classified_as or "other", {}),
+                timeout=10.0,
+            )
+            extraction_data = extract_result.get("extraction", {})
+            is_useful = (
+                extraction_data
+                and not extraction_data.get("parse_error")
+                and "provide" not in str(extraction_data.get("raw_text", "")).lower()[:100]
+            )
+            if is_useful:
+                extract_model = extract_result.get("model_version", "unknown")
+            else:
+                extraction_data = None
+    except (asyncio.TimeoutError, Exception) as e:
+        logger.info("AI extract skipped (timeout/error): %s", e)
+        extraction_data = None
 
-        # Check if AI actually returned useful data or just asked for input
-        is_useful = (
-            extraction_data
-            and not extraction_data.get("parse_error")
-            and "provide" not in str(extraction_data.get("raw_text", "")).lower()[:100]
-        )
+    if not extraction_data:
+        extraction_data = _get_mock_extraction(doc.classified_as)
 
-        if not is_useful:
-            extraction_data = _get_mock_extraction(doc.classified_as)
-            extract_result["model_version"] = "mock_fallback_v1"
+    # ── Store extraction (always — whether from AI or mock) ──
+    ext_data = extraction_data
 
-        ext_data = extraction_data
+    new_extraction = Extraction(
+        extraction_id=uuid.uuid4(),
+        document_id=doc.document_id,
+        owner_id=owner.owner_id,
+        profile_id=doc.profile_id,
+        model_version=extract_model,
+        schema_version="1.0",
+        json_payload=extraction_data,
+        validation_flags=[],
+        is_current=True,
+        user_corrected=False,
+    )
+    db.add(new_extraction)
+    await db.flush()
+    extraction_id = new_extraction.extraction_id
 
-        new_extraction = Extraction(
-            extraction_id=uuid.uuid4(),
-            document_id=doc.document_id,
-            owner_id=owner.owner_id,
-            profile_id=doc.profile_id,
-            model_version=extract_result.get("model_version", "unknown"),
-            schema_version=extract_result.get("schema_version", "1.0"),
-            json_payload=extraction_data,
-            validation_flags=extract_result.get("validation_flags", []),
-            is_current=True,
-            user_corrected=False,
-        )
-        db.add(new_extraction)
-        await db.flush()
-        extraction_id = new_extraction.extraction_id
+    # Denormalize lab values
+    report_date_str = ext_data.get("report_date")
+    report_date = None
+    if report_date_str:
+        try:
+            report_date = datetime.strptime(report_date_str, "%Y-%m-%d")
+            doc.document_date = report_date.date() if hasattr(report_date, 'date') else report_date
+        except (ValueError, TypeError):
+            pass
 
-        # Denormalize lab values
-        report_date_str = ext_data.get("report_date")
-        report_date = None
-        if report_date_str:
+    doc.provider_name = ext_data.get("lab_name") or ext_data.get("doctor_name") or ext_data.get("prescribed_by")
+    observed_at = report_date or datetime.now(timezone.utc)
+
+    if doc.classified_as == "lab_report" and "tests" in ext_data:
+        for test in ext_data["tests"]:
             try:
-                report_date = datetime.strptime(report_date_str, "%Y-%m-%d")
-                doc.document_date = report_date.date() if hasattr(report_date, 'date') else report_date
-            except (ValueError, TypeError):
-                pass
+                ref_range = test.get("reference_range", "")
+                ref_low = None
+                ref_high = None
+                if "-" in str(ref_range):
+                    parts = str(ref_range).split("-")
+                    ref_low = _parse_float(parts[0])
+                    ref_high = _parse_float(parts[-1])
 
-        doc.provider_name = ext_data.get("lab_name") or ext_data.get("doctor_name") or ext_data.get("prescribed_by")
-        observed_at = report_date or datetime.now(timezone.utc)
-
-        if doc.classified_as == "lab_report" and "tests" in ext_data:
-            for test in ext_data["tests"]:
-                try:
-                    ref_range = test.get("reference_range", "")
-                    ref_low = None
-                    ref_high = None
-                    if "-" in str(ref_range):
-                        parts = str(ref_range).split("-")
-                        ref_low = _parse_float(parts[0])
-                        ref_high = _parse_float(parts[-1])
-
-                    lv = LabValue(
-                        owner_id=owner.owner_id,
-                        profile_id=doc.profile_id,
-                        document_id=doc.document_id,
-                        extraction_id=new_extraction.extraction_id,
-                        test_name=test.get("test_name", "Unknown"),
-                        loinc_code=test.get("loinc_code"),
-                        value_num=_parse_float(test.get("value")),
-                        value_text=str(test.get("value", "")),
-                        unit=test.get("unit", ""),
-                        ref_low=ref_low,
-                        ref_high=ref_high,
-                        observed_at=observed_at,
-                        flag=test.get("flag", "normal"),
-                    )
-                    db.add(lv)
-                except Exception as e:
-                    logger.warning("Failed to denormalize lab value: %s", e)
-
-        elif doc.classified_as == "prescription" and "medications" in ext_data:
-            try:
-                rx = Prescription(
-                    prescription_id=uuid.uuid4(),
+                lv = LabValue(
                     owner_id=owner.owner_id,
                     profile_id=doc.profile_id,
                     document_id=doc.document_id,
-                    items=ext_data["medications"],
-                    active=True,
-                    prescribed_at=doc.document_date or date.today(),
-                    source="ai_extraction",
+                    extraction_id=new_extraction.extraction_id,
+                    test_name=test.get("test_name", "Unknown"),
+                    loinc_code=test.get("loinc_code"),
+                    value_num=_parse_float(test.get("value")),
+                    value_text=str(test.get("value", "")),
+                    unit=test.get("unit", ""),
+                    ref_low=ref_low,
+                    ref_high=ref_high,
+                    observed_at=observed_at,
+                    flag=test.get("flag", "normal"),
                 )
-                db.add(rx)
+                db.add(lv)
             except Exception as e:
-                logger.warning("Failed to create prescription: %s", e)
+                logger.warning("Failed to denormalize lab value: %s", e)
 
-    except Exception as e:
-        logger.error("Extraction failed for %s: %s — using mock", document_id, e)
-        ext_data = _get_mock_extraction(doc.classified_as)
-        new_extraction = Extraction(
-            extraction_id=uuid.uuid4(),
-            document_id=doc.document_id,
-            owner_id=owner.owner_id,
-            profile_id=doc.profile_id,
-            model_version="mock_fallback_v1",
-            schema_version="1.0",
-            json_payload=ext_data,
-            is_current=True,
-            user_corrected=False,
-        )
-        db.add(new_extraction)
-        await db.flush()
-        extraction_id = new_extraction.extraction_id
+    elif doc.classified_as == "prescription" and "medications" in ext_data:
+        try:
+            rx = Prescription(
+                prescription_id=uuid.uuid4(),
+                owner_id=owner.owner_id,
+                profile_id=doc.profile_id,
+                document_id=doc.document_id,
+                items=ext_data["medications"],
+                active=True,
+                prescribed_at=doc.document_date or date.today(),
+                source="ai_extraction",
+            )
+            db.add(rx)
+        except Exception as e:
+            logger.warning("Failed to create prescription: %s", e)
 
     # --- Step 2b: Embed chunks for RAG ---
     if extraction_id and ext_data:
