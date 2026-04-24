@@ -1,230 +1,167 @@
-"""Demo data seeder — populates the database with realistic Indian health records.
+"""Demo seed data — creates realistic documents for POC testing.
 
-Called automatically when a new demo user is created via /auth/dev-create.
-Matches the mobile seed data so both sides stay in sync.
+Called from /auth/dev-create on first user creation.
+This data is mocked — it simulates what the AI extraction pipeline
+would produce for real uploaded documents.
+
+NO fake prescriptions — only seed lab reports. Medications should
+only appear when a user actually uploads a prescription.
 """
 import uuid
 import logging
-from datetime import datetime, timezone, date
-
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-
-from app.models.document import Document
-from app.models.extraction import Extraction
-from app.models.lab_value import LabValue
-from app.models.prescription import Prescription
-from app.models.timeline_event import TimelineEvent
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
-SEED_DATA = [
-    {
-        "classified_as": "lab_report",
-        "provider_name": "Dr Lal PathLabs",
-        "document_date": date(2025, 10, 15),
-        "tests": [
-            {"test_name": "Hemoglobin", "value_num": 13.8, "unit": "g/dL", "ref_low": 13.0, "ref_high": 17.5, "flag": "ok", "loinc_code": "718-7"},
-            {"test_name": "Fasting Glucose", "value_num": 112, "unit": "mg/dL", "ref_low": 70, "ref_high": 100, "flag": "watch", "loinc_code": "1558-6"},
-            {"test_name": "HbA1c", "value_num": 6.8, "unit": "%", "ref_low": 4.0, "ref_high": 5.6, "flag": "watch", "loinc_code": "4548-4"},
-            {"test_name": "Total Cholesterol", "value_num": 228, "unit": "mg/dL", "ref_low": 0, "ref_high": 200, "flag": "watch", "loinc_code": "2093-3"},
-            {"test_name": "LDL Cholesterol", "value_num": 148, "unit": "mg/dL", "ref_low": 0, "ref_high": 100, "flag": "flag", "loinc_code": "2089-1"},
-            {"test_name": "HDL Cholesterol", "value_num": 42, "unit": "mg/dL", "ref_low": 40, "ref_high": 60, "flag": "ok", "loinc_code": "2085-9"},
-            {"test_name": "Creatinine", "value_num": 0.9, "unit": "mg/dL", "ref_low": 0.7, "ref_high": 1.3, "flag": "ok", "loinc_code": "2160-0"},
-            {"test_name": "TSH", "value_num": 3.2, "unit": "mIU/L", "ref_low": 0.4, "ref_high": 4.0, "flag": "ok", "loinc_code": "3016-3"},
-        ],
-    },
-    {
-        "classified_as": "lab_report",
-        "provider_name": "Thyrocare Technologies",
-        "document_date": date(2026, 1, 10),
-        "tests": [
-            {"test_name": "Hemoglobin", "value_num": 14.1, "unit": "g/dL", "ref_low": 13.0, "ref_high": 17.5, "flag": "ok", "loinc_code": "718-7"},
-            {"test_name": "Fasting Glucose", "value_num": 118, "unit": "mg/dL", "ref_low": 70, "ref_high": 100, "flag": "watch", "loinc_code": "1558-6"},
-            {"test_name": "HbA1c", "value_num": 7.1, "unit": "%", "ref_low": 4.0, "ref_high": 5.6, "flag": "flag", "loinc_code": "4548-4"},
-            {"test_name": "Total Cholesterol", "value_num": 215, "unit": "mg/dL", "ref_low": 0, "ref_high": 200, "flag": "watch", "loinc_code": "2093-3"},
-            {"test_name": "LDL Cholesterol", "value_num": 132, "unit": "mg/dL", "ref_low": 0, "ref_high": 100, "flag": "flag", "loinc_code": "2089-1"},
-            {"test_name": "HDL Cholesterol", "value_num": 44, "unit": "mg/dL", "ref_low": 40, "ref_high": 60, "flag": "ok", "loinc_code": "2085-9"},
-            {"test_name": "Triglycerides", "value_num": 195, "unit": "mg/dL", "ref_low": 0, "ref_high": 150, "flag": "watch", "loinc_code": "2571-8"},
-            {"test_name": "SGPT (ALT)", "value_num": 34, "unit": "U/L", "ref_low": 7, "ref_high": 56, "flag": "ok", "loinc_code": "1742-6"},
-            {"test_name": "Vitamin D", "value_num": 18, "unit": "ng/mL", "ref_low": 30, "ref_high": 100, "flag": "flag", "loinc_code": "1989-3"},
-        ],
-    },
-    {
-        "classified_as": "lab_report",
-        "provider_name": "Apollo Diagnostics",
-        "document_date": date(2026, 4, 5),
-        "tests": [
-            {"test_name": "Hemoglobin", "value_num": 13.5, "unit": "g/dL", "ref_low": 13.0, "ref_high": 17.5, "flag": "ok", "loinc_code": "718-7"},
-            {"test_name": "Fasting Glucose", "value_num": 126, "unit": "mg/dL", "ref_low": 70, "ref_high": 100, "flag": "flag", "loinc_code": "1558-6"},
-            {"test_name": "HbA1c", "value_num": 7.8, "unit": "%", "ref_low": 4.0, "ref_high": 5.6, "flag": "flag", "loinc_code": "4548-4"},
-            {"test_name": "Total Cholesterol", "value_num": 198, "unit": "mg/dL", "ref_low": 0, "ref_high": 200, "flag": "ok", "loinc_code": "2093-3"},
-            {"test_name": "LDL Cholesterol", "value_num": 118, "unit": "mg/dL", "ref_low": 0, "ref_high": 100, "flag": "watch", "loinc_code": "2089-1"},
-            {"test_name": "Creatinine", "value_num": 1.0, "unit": "mg/dL", "ref_low": 0.7, "ref_high": 1.3, "flag": "ok", "loinc_code": "2160-0"},
-            {"test_name": "TSH", "value_num": 4.8, "unit": "mIU/L", "ref_low": 0.4, "ref_high": 4.0, "flag": "watch", "loinc_code": "3016-3"},
-            {"test_name": "SGPT (ALT)", "value_num": 42, "unit": "U/L", "ref_low": 7, "ref_high": 56, "flag": "ok", "loinc_code": "1742-6"},
-            {"test_name": "SGOT (AST)", "value_num": 38, "unit": "U/L", "ref_low": 5, "ref_high": 40, "flag": "ok", "loinc_code": "1920-8"},
-            {"test_name": "Vitamin D", "value_num": 24, "unit": "ng/mL", "ref_low": 30, "ref_high": 100, "flag": "watch", "loinc_code": "1989-3"},
-        ],
-    },
-    {
-        "classified_as": "prescription",
-        "provider_name": "Dr. S. Krishnan, MD (Gen Med)",
-        "document_date": date(2025, 11, 1),
-        "medications": [
-            {"drug_name": "Atorvastatin", "dose": "10mg", "frequency": "0-0-1", "duration": "Ongoing"},
-            {"drug_name": "Metformin", "dose": "500mg", "frequency": "1-0-1", "duration": "Ongoing"},
-        ],
-    },
-    {
-        "classified_as": "prescription",
-        "provider_name": "Dr. S. Krishnan, MD (Gen Med)",
-        "document_date": date(2026, 1, 15),
-        "medications": [
-            {"drug_name": "Atorvastatin", "dose": "10mg", "frequency": "0-0-1", "duration": "Ongoing"},
-            {"drug_name": "Metformin", "dose": "500mg", "frequency": "1-0-1", "duration": "Ongoing"},
-            {"drug_name": "Vitamin D3", "dose": "60000 IU", "frequency": "Weekly", "duration": "8 weeks"},
-        ],
-    },
+
+# Realistic Indian lab report data
+SEED_LAB_TESTS = [
+    {"test_name": "Hemoglobin", "loinc_code": "718-7", "value": "14.2", "unit": "g/dL", "reference_range": "13.0-17.0", "flag": "normal"},
+    {"test_name": "Fasting Blood Glucose", "loinc_code": "1558-6", "value": "126", "unit": "mg/dL", "reference_range": "70-100", "flag": "above"},
+    {"test_name": "HbA1c", "loinc_code": "4548-4", "value": "6.8", "unit": "%", "reference_range": "4.0-5.6", "flag": "above"},
+    {"test_name": "Total Cholesterol", "loinc_code": "2093-3", "value": "228", "unit": "mg/dL", "reference_range": "125-200", "flag": "above"},
+    {"test_name": "LDL Cholesterol", "loinc_code": "2089-1", "value": "152", "unit": "mg/dL", "reference_range": "0-100", "flag": "above"},
+    {"test_name": "HDL Cholesterol", "loinc_code": "2085-9", "value": "42", "unit": "mg/dL", "reference_range": "40-60", "flag": "normal"},
+    {"test_name": "Triglycerides", "loinc_code": "2571-8", "value": "178", "unit": "mg/dL", "reference_range": "0-150", "flag": "above"},
+    {"test_name": "Creatinine", "loinc_code": "2160-0", "value": "1.0", "unit": "mg/dL", "reference_range": "0.7-1.3", "flag": "normal"},
+    {"test_name": "TSH", "loinc_code": "3016-3", "value": "4.2", "unit": "mIU/L", "reference_range": "0.4-4.0", "flag": "above"},
+    {"test_name": "SGPT (ALT)", "loinc_code": "1742-6", "value": "32", "unit": "U/L", "reference_range": "7-56", "flag": "normal"},
+    {"test_name": "SGOT (AST)", "loinc_code": "1920-8", "value": "28", "unit": "U/L", "reference_range": "10-40", "flag": "normal"},
+    {"test_name": "Vitamin D (25-OH)", "loinc_code": "1989-3", "value": "18", "unit": "ng/mL", "reference_range": "30-100", "flag": "below"},
 ]
 
 
-async def seed_demo_data(
-    db: AsyncSession, owner_id: uuid.UUID, profile_id: uuid.UUID
-) -> int:
-    """Insert demo documents, lab values, prescriptions, and timeline events.
+async def cleanup_demo_data(db, owner_id: uuid.UUID):
+    """Delete ALL data for the demo owner. Use before re-seeding."""
+    from sqlalchemy import text
+    
+    tables = [
+        "smart_report_cache",
+        "document_embedding",
+        "lab_value",
+        "extraction",
+        "timeline_event",
+        "prescription",
+        "document",
+    ]
+    
+    for table in tables:
+        try:
+            await db.execute(
+                text(f"DELETE FROM {table} WHERE owner_id = :oid"),
+                {"oid": str(owner_id)},
+            )
+        except Exception as e:
+            logger.warning("cleanup %s: %s", table, e)
+    
+    logger.info("Cleaned up all demo data for owner %s", owner_id)
 
-    Idempotent: skips if documents already exist for this owner.
-    Returns the number of documents seeded.
+
+async def seed_demo_documents(db, owner_id: uuid.UUID, profile_id: uuid.UUID):
+    """Create demo documents with extractions for the demo owner.
+    
+    Only seeds if no documents exist yet for this owner.
+    Only lab reports — NO prescriptions or fake medications.
     """
-    count = (
-        await db.execute(
-            select(func.count()).select_from(Document).where(
-                Document.owner_id == owner_id
-            )
-        )
-    ).scalar() or 0
-    if count > 0:
-        logger.info("Demo data already exists for %s (%d docs), skipping", owner_id, count)
-        return 0
-
-    event_type_map = {
-        "lab_report": "lab",
-        "prescription": "prescription",
-    }
-
-    seeded = 0
-    for seed in SEED_DATA:
-        doc_date = seed["document_date"]
-        occurred_at = datetime.combine(
-            doc_date, datetime.min.time()
-        ).replace(tzinfo=timezone.utc)
-
-        # --- Document ---
-        doc = Document(
+    from sqlalchemy import select, func
+    from app.models.document import Document
+    from app.models.extraction import Extraction
+    from app.models.lab_value import LabValue
+    from app.models.timeline_event import TimelineEvent
+    
+    # Check if documents already exist
+    count = await db.execute(
+        select(func.count()).select_from(Document).where(Document.owner_id == owner_id)
+    )
+    if count.scalar() > 0:
+        logger.info("Demo owner already has documents, skipping seed")
+        return
+    
+    now = datetime.now(timezone.utc)
+    
+    # --- Lab Report only ---
+    lab_doc_id = uuid.uuid4()
+    lab_ext_id = uuid.uuid4()
+    lab_report_date = now - timedelta(days=14)  # 2 weeks ago
+    
+    lab_doc = Document(
+        document_id=lab_doc_id,
+        owner_id=owner_id,
+        profile_id=profile_id,
+        source="upload",
+        mime_type="application/pdf",
+        byte_size=245000,
+        page_count=2,
+        s3_key=f"demo/{lab_doc_id}.pdf",
+        sha256="demo_lab_sha256",
+        classified_as="lab_report",
+        classification_confidence=0.96,
+        document_date=lab_report_date.date(),
+        provider_name="Sample Lab",
+    )
+    db.add(lab_doc)
+    
+    lab_ext = Extraction(
+        extraction_id=lab_ext_id,
+        document_id=lab_doc_id,
+        owner_id=owner_id,
+        profile_id=profile_id,
+        model_version="demo_seed_v1",
+        schema_version="1.0",
+        json_payload={
+            "tests": SEED_LAB_TESTS,
+            "lab_name": "Sample Lab",
+            "report_date": lab_report_date.strftime("%Y-%m-%d"),
+            "patient_name": "Demo User",
+        },
+        validation_flags=[],
+        is_current=True,
+    )
+    db.add(lab_ext)
+    
+    # Create lab_value rows for trending
+    for test in SEED_LAB_TESTS:
+        ref_parts = test["reference_range"].split("-")
+        ref_low = float(ref_parts[0]) if len(ref_parts) == 2 else None
+        ref_high = float(ref_parts[1]) if len(ref_parts) == 2 else None
+        
+        lv = LabValue(
             owner_id=owner_id,
             profile_id=profile_id,
-            source="demo_seed",
-            mime_type="application/pdf",
-            byte_size=0,
-            page_count=1,
-            s3_key=f"demo/{seed['provider_name'].replace(' ', '_')}_{doc_date.isoformat()}.pdf",
-            sha256=f"demo-{seeded}",
-            classified_as=seed["classified_as"],
-            classification_confidence=0.99,
-            document_date=doc_date,
-            provider_name=seed["provider_name"],
+            document_id=lab_doc_id,
+            test_name=test["test_name"],
+            loinc_code=test["loinc_code"],
+            value_num=float(test["value"]),
+            value_text=test["value"],
+            unit=test["unit"],
+            ref_low=ref_low,
+            ref_high=ref_high,
+            flag=test["flag"],
+            observed_at=lab_report_date,
         )
-        db.add(doc)
-        await db.flush()
+        db.add(lv)
+    
+    # Timeline event for lab report
+    lab_timeline = TimelineEvent(
+        owner_id=owner_id,
+        profile_id=profile_id,
+        event_type="lab",
+        title="Lab Report uploaded",
+        subtitle="Sample Lab",
+        provider="Sample Lab",
+        occurred_at=lab_report_date,
+        source_ref=lab_doc_id,
+        source_ref_type="document",
+        flags=[
+            {"text": "Fasting Glucose 126", "severity": "above"},
+            {"text": "HbA1c 6.8", "severity": "above"},
+            {"text": "Total Cholesterol 228", "severity": "above"},
+        ],
+    )
+    db.add(lab_timeline)
+    
+    logger.info("Demo seed: created lab report (%s) — no prescriptions", lab_doc_id)
 
-        # --- Extraction ---
-        if seed["classified_as"] == "lab_report":
-            json_payload = {
-                "report_date": doc_date.isoformat(),
-                "lab_name": seed["provider_name"],
-                "tests": seed["tests"],
-            }
-        else:
-            json_payload = {
-                "report_date": doc_date.isoformat(),
-                "prescribed_by": seed["provider_name"],
-                "medications": seed["medications"],
-            }
 
-        extraction = Extraction(
-            document_id=doc.document_id,
-            owner_id=owner_id,
-            profile_id=profile_id,
-            model_version="demo-seed",
-            schema_version="v1",
-            json_payload=json_payload,
-            is_current=True,
-        )
-        db.add(extraction)
-        await db.flush()
-
-        # --- Lab Values / Prescriptions ---
-        if seed["classified_as"] == "lab_report":
-            for test in seed["tests"]:
-                lv = LabValue(
-                    owner_id=owner_id,
-                    profile_id=profile_id,
-                    document_id=doc.document_id,
-                    extraction_id=extraction.extraction_id,
-                    test_name=test["test_name"],
-                    loinc_code=test.get("loinc_code"),
-                    value_num=test["value_num"],
-                    value_text=str(test["value_num"]),
-                    unit=test["unit"],
-                    ref_low=test["ref_low"],
-                    ref_high=test["ref_high"],
-                    observed_at=occurred_at,
-                    flag=test.get("flag", "ok"),
-                )
-                db.add(lv)
-        else:
-            rx = Prescription(
-                owner_id=owner_id,
-                profile_id=profile_id,
-                document_id=doc.document_id,
-                prescribed_by=seed["provider_name"],
-                prescribed_at=doc_date,
-                items=seed["medications"],
-                active=True,
-                source="demo_seed",
-            )
-            db.add(rx)
-
-        # --- Timeline Event ---
-        evt_type = event_type_map.get(seed["classified_as"], "note")
-        title = f"{seed['classified_as'].replace('_', ' ').title()} uploaded"
-
-        # Build flags for lab reports
-        flags = None
-        if seed["classified_as"] == "lab_report":
-            flag_items = [
-                {"text": f"{t['test_name']} {t['value_num']}", "severity": t["flag"]}
-                for t in seed["tests"]
-                if t.get("flag") in ("watch", "flag", "critical")
-            ][:3]
-            if flag_items:
-                flags = flag_items
-
-        timeline = TimelineEvent(
-            owner_id=owner_id,
-            profile_id=profile_id,
-            event_type=evt_type,
-            occurred_at=occurred_at,
-            source_ref=doc.document_id,
-            source_ref_type="document",
-            title=title,
-            subtitle=seed["provider_name"],
-            provider=seed["provider_name"],
-            flags=flags,
-        )
-        db.add(timeline)
-        seeded += 1
-
-    logger.info("Seeded %d demo documents for owner %s", seeded, owner_id)
-    return seeded
+# Alias for backward compatibility with auth.py import
+seed_demo_data = seed_demo_documents

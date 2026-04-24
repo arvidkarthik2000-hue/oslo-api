@@ -1,6 +1,10 @@
 """Mock AI service — realistic responses for Days 1-3 before XQZ's endpoint goes live.
 
 Used when AI_SERVICE_BASE_URL is empty in .env.
+
+IMPORTANT: Mock responses must NOT mention specific medications unless
+prescription data is passed in context. The seed data only includes lab
+reports — no prescriptions.
 """
 import uuid
 import logging
@@ -34,11 +38,11 @@ MOCK_SMART_REPORT_MD = """## Cardiovascular
 
 Your recent lipid panel shows total cholesterol at **228 mg/dL** (above the typical range of <200) and LDL cholesterol at **152 mg/dL** (above the typical range of <100). HDL cholesterol is **42 mg/dL**, which is within the acceptable range but toward the lower end. Triglycerides are **178 mg/dL** (above the typical range of <150).
 
-You are currently on Atorvastatin 10mg. Given that LDL remains above target, your prescribing doctor may consider dose adjustment at the next visit.
+Given that LDL remains above target, discuss management options with your doctor at the next visit.
 
 ## Liver
 
-SGPT (ALT) at **32 U/L** and SGOT (AST) at **28 U/L** are both within the typical range. No concerns noted. Continue monitoring given statin use.
+SGPT (ALT) at **32 U/L** and SGOT (AST) at **28 U/L** are both within the typical range. No concerns noted. Continue monitoring periodically.
 
 ## Renal
 
@@ -46,7 +50,7 @@ Creatinine at **1.0 mg/dL** is within the typical range. Kidney function appears
 
 ## Metabolic
 
-Fasting glucose at **118 mg/dL** and HbA1c at **6.8%** indicate pre-diabetic to early diabetic range. You are on Metformin 500mg twice daily. Consistent dietary management and regular monitoring are recommended.
+Fasting glucose at **118 mg/dL** and HbA1c at **6.8%** indicate pre-diabetic to early diabetic range. Consistent dietary management and regular monitoring are recommended. Discuss treatment options with your doctor.
 
 ## Inflammatory
 
@@ -54,44 +58,44 @@ No CRP, ESR, or ferritin values available in recent reports. Consider adding the
 
 ## Hormonal
 
-TSH at **4.8 mIU/L** is mildly above the typical range (0.4–4.0). This may indicate subclinical hypothyroidism. A repeat TSH with free T3/T4 is recommended to confirm before initiating treatment.
+TSH at **4.8 mIU/L** is mildly above the typical range (0.4\u20134.0). This may indicate subclinical hypothyroidism. A repeat TSH with free T3/T4 is recommended to confirm before initiating treatment.
 
-Vitamin D at **18 ng/mL** is below the sufficient range (30–100). You are currently on weekly supplementation which should be continued."""
+Vitamin D at **18 ng/mL** is below the sufficient range (30\u2013100). Consider supplementation and recheck in 8-12 weeks."""
 
 MOCK_SMART_REPORT_SECTIONS = [
     {"system": "cardiovascular", "status": "watch", "key_values": [
-        {"test": "Total Cholesterol", "value": 228, "unit": "mg/dL", "flag": "watch"},
-        {"test": "LDL Cholesterol", "value": 152, "unit": "mg/dL", "flag": "flag"},
-        {"test": "HDL Cholesterol", "value": 42, "unit": "mg/dL", "flag": "ok"},
-        {"test": "Triglycerides", "value": 178, "unit": "mg/dL", "flag": "watch"},
+        {"name": "Total Cholesterol", "value": "228 mg/dL", "flag": "watch"},
+        {"name": "LDL Cholesterol", "value": "152 mg/dL", "flag": "flag"},
+        {"name": "HDL Cholesterol", "value": "42 mg/dL", "flag": "ok"},
+        {"name": "Triglycerides", "value": "178 mg/dL", "flag": "watch"},
     ]},
     {"system": "liver", "status": "ok", "key_values": [
-        {"test": "SGPT (ALT)", "value": 32, "unit": "U/L", "flag": "ok"},
-        {"test": "SGOT (AST)", "value": 28, "unit": "U/L", "flag": "ok"},
+        {"name": "SGPT (ALT)", "value": "32 U/L", "flag": "ok"},
+        {"name": "SGOT (AST)", "value": "28 U/L", "flag": "ok"},
     ]},
     {"system": "renal", "status": "ok", "key_values": [
-        {"test": "Creatinine", "value": 1.0, "unit": "mg/dL", "flag": "ok"},
+        {"name": "Creatinine", "value": "1.0 mg/dL", "flag": "ok"},
     ]},
     {"system": "metabolic", "status": "watch", "key_values": [
-        {"test": "Fasting Glucose", "value": 118, "unit": "mg/dL", "flag": "watch"},
-        {"test": "HbA1c", "value": 6.8, "unit": "%", "flag": "watch"},
+        {"name": "Fasting Glucose", "value": "118 mg/dL", "flag": "watch"},
+        {"name": "HbA1c", "value": "6.8 %", "flag": "watch"},
     ]},
     {"system": "inflammatory", "status": "ok", "key_values": []},
     {"system": "hormonal", "status": "watch", "key_values": [
-        {"test": "TSH", "value": 4.8, "unit": "mIU/L", "flag": "watch"},
-        {"test": "Vitamin D", "value": 18, "unit": "ng/mL", "flag": "flag"},
+        {"name": "TSH", "value": "4.8 mIU/L", "flag": "watch"},
+        {"name": "Vitamin D", "value": "18 ng/mL", "flag": "flag"},
     ]},
 ]
 
 MOCK_EXPLANATION_MD = """### Understanding Your Lab Report
 
-**Blood Sugar:** Your fasting glucose (118 mg/dL) and HbA1c (6.8%) suggest your blood sugar levels are above the typical range. HbA1c reflects your average blood sugar over the past 2-3 months. The typical range is below 5.7%; values between 5.7-6.4% suggest pre-diabetes, and above 6.5% suggest diabetes. Your current Metformin medication helps manage this.
+**Blood Sugar:** Your fasting glucose (118 mg/dL) and HbA1c (6.8%) suggest your blood sugar levels are above the typical range. HbA1c reflects your average blood sugar over the past 2-3 months. The typical range is below 5.7%; values between 5.7-6.4% suggest pre-diabetes, and above 6.5% suggest diabetes. Discuss treatment options with your doctor.
 
-**Cholesterol Panel:** Your LDL ("bad") cholesterol at 152 mg/dL is above the recommended level of below 100 mg/dL. While your HDL ("good") cholesterol at 42 is acceptable, higher would be better. Triglycerides at 178 are also above the typical range of below 150. Your Atorvastatin medication addresses this.
+**Cholesterol Panel:** Your LDL (\u201cbad\u201d) cholesterol at 152 mg/dL is above the recommended level of below 100 mg/dL. While your HDL (\u201cgood\u201d) cholesterol at 42 is acceptable, higher would be better. Triglycerides at 178 are also above the typical range of below 150. Discuss lipid management strategies with your doctor.
 
 **Thyroid:** TSH at 4.8 is slightly above the typical upper limit of 4.0. This could indicate your thyroid is working slightly harder than usual. A follow-up test including free T3 and T4 levels would provide a clearer picture.
 
-**Vitamin D:** At 18 ng/mL, your vitamin D is below the sufficient level of 30. Your current weekly supplementation should help bring this up. Recheck in 8-12 weeks.
+**Vitamin D:** At 18 ng/mL, your vitamin D is below the sufficient level of 30. Consider vitamin D supplementation and recheck in 8-12 weeks.
 
 **Liver & Kidney:** Both are within the typical range. No immediate concerns.
 
@@ -99,32 +103,31 @@ MOCK_EXPLANATION_MD = """### Understanding Your Lab Report
 
 MOCK_TIMELINE_SUMMARY_MD = """## Health Timeline Summary
 
-### Chief Conditions
-- Type 2 Diabetes Mellitus (managed with Metformin 500mg BD)
-- Dyslipidemia (managed with Atorvastatin 10mg HS)
-- Vitamin D deficiency (on supplementation)
-- Subclinical hypothyroidism (monitoring)
+### Key Findings
+- Pre-diabetic / early diabetic range (Fasting Glucose 118 mg/dL, HbA1c 6.8%)
+- Dyslipidemia (LDL 152, Total Cholesterol 228, Triglycerides 178 mg/dL)
+- Vitamin D deficiency (18 ng/mL \u2014 below sufficient range of 30-100)
+- Mildly elevated TSH (4.8 mIU/L \u2014 possible subclinical hypothyroidism)
 
 ### Current Medications
-1. **Metformin 500mg** — 1-0-1 (morning and night with meals)
-2. **Atorvastatin 10mg** — 0-0-1 (bedtime)
-3. **Vitamin D3 60,000 IU** — weekly for 8 weeks
+No prescriptions uploaded yet. Upload a prescription to track your medications here.
 
-### Recent Changes
-- April 2026: Fasting glucose 118, HbA1c 6.8% — slight upward trend from previous 6.4%
-- February 2026: BP noted as 138/88 at clinic visit — borderline
-- Started experiencing increased fatigue (patient-reported, April 2026)
+### Recent Lab Results
+- Fasting glucose 118 mg/dL \u2014 above typical range (70-100)
+- HbA1c 6.8% \u2014 above typical range (<5.7%)
+- LDL Cholesterol 152 mg/dL \u2014 above target (<100)
+- Vitamin D 18 ng/mL \u2014 below sufficient (>30)
 
 ### Health Risks to Monitor
-- **Cardiovascular:** LDL remains above target despite statin therapy. Consider dose escalation or lifestyle modification.
-- **Metabolic:** HbA1c trending upward — may need Metformin dose adjustment or additional agent.
-- **Thyroid:** Subclinical hypothyroidism may be contributing to fatigue. Confirm with free T3/T4.
+- **Cardiovascular:** LDL and total cholesterol remain above target. Discuss lipid management with your doctor.
+- **Metabolic:** HbA1c in diabetic range \u2014 consider dietary changes and medical consultation.
+- **Thyroid:** Subclinical hypothyroidism may be present. Confirm with free T3/T4 testing.
 
 ### Recommended Follow-ups
-1. Repeat lipid panel in 3 months post dose adjustment discussion
+1. Repeat lipid panel in 3 months
 2. TSH + free T3/T4 to evaluate thyroid status
-3. Vitamin D recheck after completing 8-week supplementation
-4. Regular BP monitoring — consider home BP device"""
+3. Vitamin D recheck after 8-12 weeks of supplementation
+4. Regular BP monitoring \u2014 consider home BP device"""
 
 
 async def mock_classify(document_id: str, image_urls: list[str]) -> dict:
@@ -158,7 +161,7 @@ async def mock_extract(document_id: str, image_urls: list[str], document_class: 
         "schema_version": "v1",
         "extraction": {
             "tests": MOCK_LAB_TESTS,
-            "lab_name": "Dr. Lal PathLabs",
+            "lab_name": "Sample Laboratory",
             "report_date": "2026-04-10",
             "patient_name": "Demo User",
         },
@@ -195,7 +198,7 @@ async def mock_ask(question: str, context_documents: list[dict]) -> dict:
         }
 
     return {
-        "answer_markdown": f"Based on your recent lab reports, here is what I found regarding your question:\n\nYour most recent HbA1c was **6.8%** (recorded April 2026), which is above the typical range of <5.7%. Three months prior, it was **6.4%**. This shows a slight upward trend.\n\nYour fasting glucose was **118 mg/dL**, also above the typical fasting range of 70-100 mg/dL.\n\nYou are currently on Metformin 500mg twice daily. [1]\n\n> *This information is from your health records and is not medical advice.*",
+        "answer_markdown": f"Based on your recent lab reports, here is what I found regarding your question:\n\nYour most recent HbA1c was **6.8%** (recorded April 2026), which is above the typical range of <5.7%. Three months prior, it was **6.4%**. This shows a slight upward trend.\n\nYour fasting glucose was **118 mg/dL**, also above the typical fasting range of 70-100 mg/dL.\n\nDiscuss management options with your doctor based on these trends. [1]\n\n> *This information is from your health records and is not medical advice.*",
         "intent": "factual_retrieval",
         "refused": False,
         "critical_flag": False,

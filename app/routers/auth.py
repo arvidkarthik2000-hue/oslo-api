@@ -98,6 +98,45 @@ async def dev_create(
     )
 
 
+@router.post("/demo-reset")
+async def demo_reset(
+    request: Request,
+    owner: Owner = Depends(get_current_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reset demo data — cleanup everything and re-seed fresh lab reports.
+
+    Only available in development mode.
+    """
+    if settings.environment != "development":
+        raise HTTPException(status_code=403, detail="Dev-only endpoint")
+
+    from app.models.profile import Profile as ProfileModel
+    from app.services.demo_seed import cleanup_demo_data, seed_demo_documents
+
+    # Cleanup all existing data for this owner
+    await cleanup_demo_data(db, owner.owner_id)
+
+    # Find profile and re-seed
+    profile_result = await db.execute(
+        select(ProfileModel).where(
+            ProfileModel.owner_id == owner.owner_id,
+            ProfileModel.relationship == "self",
+        )
+    )
+    profile = profile_result.scalar_one_or_none()
+    if profile:
+        await seed_demo_documents(db, owner.owner_id, profile.profile_id)
+
+    await log_audit_event(
+        db, action="auth.demo_reset", actor_type="user",
+        owner_id=owner.owner_id,
+        ip_address=request.client.host if request and request.client else None,
+    )
+
+    return {"status": "ok", "message": "Demo data reset successfully"}
+
+
 @router.post("/otp/send", response_model=OTPSendResponse)
 async def otp_send(body: OTPSendRequest, request: Request):
     """Send OTP to phone number."""

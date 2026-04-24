@@ -165,3 +165,37 @@ async def get_current_medications(
                 })
 
     return {"medications": medications, "total": len(medications)}
+
+
+@router.get("/{profile_id}/flagged-values")
+async def get_flagged_values(
+    profile_id: uuid.UUID,
+    owner: Owner = Depends(get_current_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get lab values with abnormal flags for a profile (for Values to Watch)."""
+    q = select(LabValue).where(
+        LabValue.owner_id == owner.owner_id,
+        LabValue.profile_id == profile_id,
+        LabValue.flag.in_(["above", "below", "critical", "watch", "flag"]),
+    ).order_by(LabValue.observed_at.desc()).limit(5)
+
+    result = await db.execute(q)
+    values = result.scalars().all()
+
+    return {
+        "values": [
+            {
+                "test_name": v.test_name,
+                "value_text": v.value_text,
+                "value_num": float(v.value_num) if v.value_num else None,
+                "unit": v.unit,
+                "flag": v.flag,
+                "ref_low": float(v.ref_low) if v.ref_low else None,
+                "ref_high": float(v.ref_high) if v.ref_high else None,
+                "observed_at": v.observed_at.isoformat() if v.observed_at else None,
+            }
+            for v in values
+        ],
+        "total": len(values),
+    }
