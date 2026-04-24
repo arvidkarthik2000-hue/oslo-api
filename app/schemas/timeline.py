@@ -14,7 +14,7 @@ class TimelineEventItem(BaseModel):
     provider: str | None = None
     source_ref: uuid.UUID | None = None
     source_ref_type: str | None = None
-    flags: list[dict[str, Any]] | None = None
+    flags: Any = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
