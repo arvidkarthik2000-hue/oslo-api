@@ -129,6 +129,7 @@ async def seed_demo_documents(db, owner_id: uuid.UUID, profile_id: uuid.UUID):
             owner_id=owner_id,
             profile_id=profile_id,
             document_id=lab_doc_id,
+            extraction_id=lab_ext_id,
             test_name=test["test_name"],
             loinc_code=test["loinc_code"],
             value_num=float(test["value"]),
