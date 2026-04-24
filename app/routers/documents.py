@@ -129,12 +129,16 @@ async def finalize_document(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Update storage info
-    doc.s3_key = body.s3_key
-    doc.sha256 = body.sha256 or hashlib.sha256(body.s3_key.encode()).hexdigest()[:16]
+    # Update storage info (keep existing s3_key if body doesn't provide one)
+    if body.s3_key:
+        doc.s3_key = body.s3_key
+    s3_key = doc.s3_key or ""
+    doc.sha256 = body.sha256 or hashlib.sha256(s3_key.encode()).hexdigest()[:16]
 
-    # Image URLs for AI (use s3_key as URL for POC)
-    image_urls = body.image_urls if body.image_urls else [body.s3_key]
+    # Build public URL for AI service from stored file
+    base_url = str(request.base_url).rstrip("/") if request else "http://localhost:8000"
+    file_url = f"{base_url}/{s3_key}" if s3_key else ""
+    image_urls = body.image_urls if body.image_urls else ([file_url] if file_url else [])
 
     # --- Step 1: Classify ---
     try:
